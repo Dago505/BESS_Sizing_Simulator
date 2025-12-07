@@ -310,3 +310,24 @@ def n_min(arr):
         if arr[i] < m:
             m = arr[i]
     return m
+
+@njit
+def binom(n, r):
+    if r < 0 or r > n:
+        return 0.0
+    # symmetry
+    if r > n - r:
+        r = n - r
+    c = 1.0
+    for i in range(r):
+        c = c * (n - i) / (i + 1)
+    return c
+
+@njit
+def factorial(n):
+    if n < 0:
+        return 0.0
+    result = 1.0
+    for i in range(2, n + 1):
+        result *= i
+    return result
