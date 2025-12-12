@@ -1098,7 +1098,7 @@ def RQ_33_FIGURE(a_tilde_values, p99_GL_c_vs_a, p99_ana_values, c_values):
 
     fig, ax = plt.subplots(figsize=(8,6), dpi=300)
 
-    # --------- Figura principal (lineal) ---------
+    # --------- Main figure (linear scale) ---------
     for j in range(3):
         c = round(c_values[j], 2)
         ax.plot(a_tilde_values,
@@ -1110,16 +1110,20 @@ def RQ_33_FIGURE(a_tilde_values, p99_GL_c_vs_a, p99_ana_values, c_values):
             linestyle="--", linewidth=2, color="k",
             label=r"$P_{99}^{SL, ana}(M=100)$")
 
-    ax.set_title(r"$P_{99}$ vs.\ $\tilde{a}$" "\n" r"Comparison of $P_{{99}}^{GL}$ simulation and $P_{{99}}^{SL}$ analytical solution")
+    ax.set_title(r"$P_{99}$ vs.\ $\tilde{a}$" "\n" 
+                 r"Comparison of $P_{{99}}^{GL}$ simulation and $P_{{99}}^{SL}$ analytical solution")
     ax.set_xlabel(r"$\tilde{a}$")
     ax.set_ylabel(r"$P_{99}(\tilde{b})$")
     ax.grid(True)
+
+    # ---- NEW: Bound y-axis in linear space ----
+    ax.set_ylim(0, 25)
 
     leg = ax.legend(bbox_to_anchor=(0.09, 0.97), frameon=True, fontsize=11)
     leg.get_frame().set_alpha(0.95)
 
 
-    # --------- Subfigura (log-scale) ---------
+    # --------- Inset figure (log-scale) ---------
     ax_inset = inset_axes(
         ax, width="45%", height="45%",
         bbox_to_anchor=(-0.12, -0.17, 1.1, 1.1),
@@ -1129,11 +1133,11 @@ def RQ_33_FIGURE(a_tilde_values, p99_GL_c_vs_a, p99_ana_values, c_values):
 
     for j, idx in enumerate(indices):
         ax_inset.plot(a_tilde_values,
-                    p99_GL_c_vs_a[idx, :],
-                    color=colors[j])
+                      p99_GL_c_vs_a[idx, :],
+                      color=colors[j])
 
     ax_inset.plot(a_tilde_values, p99_ana_values,
-                linestyle="--", linewidth=2, color="k")
+                  linestyle="--", linewidth=2, color="k")
 
     ax_inset.set_yscale("log")
     ax_inset.grid(True, linestyle="--", linewidth=0.6)
@@ -1142,6 +1146,9 @@ def RQ_33_FIGURE(a_tilde_values, p99_GL_c_vs_a, p99_ana_values, c_values):
     ax_inset.set_xlabel(r"$\tilde{a}$", fontsize=11)
     ax_inset.set_ylabel(r"$\log(P_{99}(\tilde{b}))$", fontsize=11)
     ax_inset.tick_params(axis="both", labelsize=10)
+
+    # ---- NEW: Bound y-axis in log space ----
+    ax_inset.set_ylim(0.5, 25)
 
     plt.tight_layout()
 
