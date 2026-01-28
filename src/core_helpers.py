@@ -56,9 +56,9 @@ def quantile(arr, q):
         return sorted_arr[lower] + (sorted_arr[upper] - sorted_arr[lower]) * (pos - lower)
     
 
-# --- histogram hekper for numba optimization ---
+# --- histogram helper for numba optimization ---
 @njit
-def histogram(values, n_bins):
+def histogram(values: np.ndarray, n_bins: int) -> Tuple[np.ndarray, np.ndarray]:
     vmin = np.min(values)
     vmax = np.max(values)
 
