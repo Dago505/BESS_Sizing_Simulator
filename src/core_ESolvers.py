@@ -53,8 +53,19 @@ def Energy_ramps(Y, a, dt):
 
     return energies[:n_ener]
 
+
+@dataclass(frozen=True)
+class PDF:
+    grid: np.ndarray
+    f: np.ndarray
+
+@dataclass(frozen=True)
+class CDF:
+    grid: np.ndarray
+    f: np.ndarray
+
 @njit
-def E_algorithmic_solution(a: float, Y: np.ndarray, dt:float, 
+def E_algorithmic_solution_raw(a: float, Y: np.ndarray, dt:float, 
                          grid: int, q: float = 0.99) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
     """ Computes the pdf "f(e)" of the BESS simulation an returns the 99 percentile "p99". 
 
@@ -83,58 +94,83 @@ def E_algorithmic_solution(a: float, Y: np.ndarray, dt:float,
 
     energies = Energy_ramps(Y, a, dt)
 
+    # --- pdf histogram calculation ---
     f_sim, e_sim = histogram(energies, grid)
 
+    # --- cdf histogram calculation ---
+    E_sim, F_sim = histogram_cdf(energies, 110000, vmin=1e-5)
+    
     #p0_sim = count_less_than(BESS, 1e-6) / BESS.size
     p99_sim = quantile(energies, q)
 
-    return energies, e_sim, f_sim, p99_sim
+    return energies, e_sim, f_sim, E_sim, F_sim, p99_sim
+
+
+def E_algorithmic_solution(a, Y, dt, grid, q=0.99):
+    energies, e_sim, f_sim, E_sim, F_sim, p99_sim = E_algorithmic_solution_raw(a, Y, dt, grid, q)
+
+    E_pdf = PDF(e_sim, f_sim)
+    E_cdf = CDF(E_sim, F_sim)
+
+    return energies, E_pdf, E_cdf, p99_sim
+
 # =====================================================================
 
 
 # ======= ENERGY NUMERICAL SOLUTION: LOG-NORMAL FITTING ===============
+# --- Numba friendly grid builder ---
+@njit
+def geomspace_grid(lo, hi, n):
+    grid = np.empty(n, dtype=np.float64)
+
+    # enforce strict positivity (required for log grid)
+    if lo <= 0.0:
+        lo = 1e-12
+    if hi <= lo:
+        hi = lo * 10.0
+
+    if n == 1:
+        grid[0] = lo
+        return grid
+
+    log_lo = np.log(lo)
+    log_hi = np.log(hi)
+    step = (log_hi - log_lo) / (n - 1)
+    for i in range(n):
+        grid[i] = np.exp(log_lo + step * i)
+    return grid
+
+
+# --- Fitted model ---
 @dataclass(frozen=True)
 class LogNormParams:
     mu: float
     sigma: float  # > 0
     scale: float  # exp(mu)
-    e_grid: None[np.ndarray]
+    e_grid: np.ndarray
 
-def LogNormal_params(m1: float, m2: float) -> LogNormParams:
+def LogNormal_params(m1: float, m2: float):
     m1 = float(m1)
     m2 = float(m2)
-
-    if not np.isfinite(m1) or not np.isfinite(m2):
-        raise ValueError("m1 and m2 must be finite.")
-    if m1 <= 0.0:
-        raise ValueError("Need m1 > 0 for a lognormal fit.")
-    if m2 <= m1 * m1:
-        raise ValueError("Need positive variance: m2 > m1^2 for a lognormal fit.")
-
+               
     sigma2 = np.log(m2 / (m1 * m1))
     sigma = float(np.sqrt(sigma2))
     mu = float(np.log(m1) - 0.5 * sigma2)
 
-    return mu, sigma, np.exp(mu)
+    return mu, sigma, float(np.exp(mu))
 
-# Log-Normal fit
 def LogNormal_fit(mu: float, sigma: float, x: np.ndarray):
     x = np.asarray(x, dtype=float)
-    if sigma <= 0:
-        raise ValueError("sigma must be > 0")
-    if np.any(x <= 0):
-        raise ValueError("x must be strictly positive for lognormal PDF/CDF")
-
     rv = lognorm(s=sigma, scale=np.exp(mu), loc=0.0)
-    pdf = rv.pdf(x)
-    cdf = rv.cdf(x)
-    return pdf, cdf
+    return rv.pdf(x), rv.cdf(x)
 
-def E_LogNorm_solution(e_sim: np.ndarray, energies: np.ndarray, 
-                       E1: float, E2: float, grid: int) -> tuple[LogNormParams, np.ndarray, np.ndarray]:
+def E_LogNorm_solution(e_sim: np.ndarray, E_min: float,
+                       E1: float, E2: float, grid: int):
     mu, sigma, scale = LogNormal_params(E1, E2)
-    e_grid = np.linspace(min(e_sim), np.max(energies), grid)
+
+    e_grid = geomspace_grid(E_min, e_sim[-1], grid)
     params = LogNormParams(mu, sigma, scale, e_grid)
     LN_pdf, LN_cdf = LogNormal_fit(mu, sigma, e_grid)
     return params, LN_pdf, LN_cdf
 # =====================================================================
+

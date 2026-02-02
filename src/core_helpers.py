@@ -13,31 +13,30 @@ from typing import Callable, Tuple, Dict, Any
 
 # --- CDF CALCULATOR ---
 @njit
-def cdf_trapz_calculator(b_grid, g, p0):
+def cdf_trapz_calculator(b_grid, g, p0=None):
     n = b_grid.shape[0]
 
     # continuous part (integral of g)
     G_cont = np.zeros(n, dtype=np.float64)
 
     if n > 1:
-        # first trapezoid
         G_cont[1] = 0.5 * (g[0] + g[1]) * (b_grid[1] - b_grid[0])
-
-        # remaining trapezoids
         for i in range(2, n):
             G_cont[i] = G_cont[i-1] + 0.5 * (g[i-1] + g[i]) * (b_grid[i] - b_grid[i-1])
 
-    # add point mass p0 and clip to [0, 1]
-    G = np.empty(n, dtype=np.float64)
-    for i in range(n):
-        val = p0 + G_cont[i]
-        if val < 0.0:
-            val = 0.0
-        elif val > 1.0:
-            val = 1.0
-        G[i] = val
+    if p0 is not None:
+        G = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            val = p0 + G_cont[i]
+            if val < 0.0:
+                val = 0.0
+            elif val > 1.0:
+                val = 1.0
+            G[i] = val
+        return G
+    else:
+        return G_cont
 
-    return G
 
 
 # --- quantile helper for numba optimization ---
@@ -90,7 +89,58 @@ def histogram(values: np.ndarray, n_bins: int) -> Tuple[np.ndarray, np.ndarray]:
 
     return density, centers
 
+@njit
+def histogram_cdf(values, n_bins, vmin=0.0):
+    n = values.size
 
+    # find vmax
+    vmax = values[0]
+    for i in range(1, n):
+        if values[i] > vmax:
+            vmax = values[i]
+
+    if vmax <= vmin:
+        vmax = vmin + 1.0
+
+    dE = (vmax - vmin) / n_bins
+
+    counts = np.zeros(n_bins)
+
+    # fill histogram
+    inv = 1.0 / (vmax - vmin)
+    for i in range(n):
+        v = values[i]
+        if v < vmin:
+            continue
+
+        idx = int((v - vmin) * inv * n_bins)
+
+        if idx >= n_bins:
+            idx = n_bins - 1
+        if idx < 0:
+            continue
+
+        counts[idx] += 1.0
+
+    # build centers + CDF
+    E_sim = np.empty(n_bins)
+    F_sim = np.empty(n_bins)
+
+    s = 0.0
+    for i in range(n_bins):
+        E_sim[i] = vmin + (i + 0.5) * dE
+
+        # convert count → probability mass and accumulate
+        s += counts[i] / n
+        F_sim[i] = s
+
+    # normalize (removes tiny numerical drift)
+    if F_sim[n_bins - 1] > 0.0:
+        inv_last = 1.0 / F_sim[n_bins - 1]
+        for i in range(n_bins):
+            F_sim[i] *= inv_last
+
+    return E_sim, F_sim
 
 # ---- cumsum helper for numba optimization ---
 @njit
