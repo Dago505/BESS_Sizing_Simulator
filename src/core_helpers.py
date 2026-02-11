@@ -142,6 +142,12 @@ def histogram_cdf(values, n_bins, vmin=0.0):
 
     return E_sim, F_sim
 
+def L1_norm(grid, f1, f2):
+    delta = grid[1] - grid[0]
+    g_diff = np.abs(f1 - f2)
+    L1 = trapezoid_integral(g_diff, delta)
+    return L1
+
 # ---- cumsum helper for numba optimization ---
 @njit
 def cumsum(arr):
@@ -257,16 +263,6 @@ def cdf_from_pdf(b, g):
 
     return c
 
-
-@njit
-def trapezoid_integral(y, dx):
-    s = 0.0
-    n = y.size
-    for k in range(n - 1):
-        s += 0.5 * (y[k] + y[k+1]) * dx
-    return s
-
-
 @njit
 def analytical_quantile(b, g, p0, q=0.99):
     # continuous CDF (without point mass at 0)
@@ -313,6 +309,56 @@ def analytical_quantile(b, g, p0, q=0.99):
     # if for numerical reasons we never found it, return last b
     return b[-1]
 
+@njit
+def Fitted_quantile(b, g, q=0.99):
+    # continuous CDF from PDF (starts at 0)
+    c = cdf_from_pdf(b, g)
+    total = c[-1]
+
+    # handle degenerate / empty mass
+    if total <= 0.0:
+        return b[0]
+
+    # target CDF level (in same units as c)
+    if q <= 0.0:
+        target = 0.0
+    elif q >= 1.0:
+        target = total
+    else:
+        target = q * total
+
+    n = c.shape[0]
+
+    # below first
+    if target <= c[0]:
+        return b[0]
+
+    # find interval and interpolate
+    for i in range(1, n):
+        if target <= c[i]:
+            c0 = c[i - 1]
+            c1 = c[i]
+            b0 = b[i - 1]
+            b1 = b[i]
+
+            dc = c1 - c0
+            if dc == 0.0:
+                return 0.5 * (b0 + b1)
+
+            t = (target - c0) / dc
+            return b0 + t * (b1 - b0)
+
+    return b[-1]
+
+
+
+@njit
+def trapezoid_integral(y, dx):
+    s = 0.0
+    n = y.size
+    for k in range(n - 1):
+        s += 0.5 * (y[k] + y[k+1]) * dx
+    return s
 
 
 #  --- Trapezoide integrator for numba optimization ---

@@ -4,23 +4,33 @@ from dataclasses import dataclass
 from typing import Sequence, Dict, Tuple
 from scipy.stats import lognorm
 from numpy.linalg import solve
-import importlib
 from numba import njit
 
-# --- Core functions ---
-import src.core_SynData
-importlib.reload(src.core_SynData)
-from src.core_SynData import *
-
+import importlib
 # --- Core code helpers ---
 import src.core_helpers
 importlib.reload(src.core_helpers)
 from src.core_helpers import *
 
-# --- Core Power Solvers ---
+# --- Core Synthetic data ---
+import src.core_SynData
+importlib.reload(src.core_SynData)
+from src.core_SynData import *
+
+# --- Solvers ---
 import src.core_Solvers
 importlib.reload(src.core_Solvers)
 from src.core_Solvers import *
+
+# --- Figures ---
+import src.core_Figures
+importlib.reload(src.core_Figures)
+from src.core_Figures import *
+
+# --- Parametric moments ---
+import src.core_Moments
+importlib.reload(src.core_Moments)
+from src.core_Moments import *
 
 
 # === ENERGY ALGORITHMIC SOLUTION: SIMULATION ===
@@ -118,8 +128,28 @@ def E_algorithmic_solution(a, Y, dt, grid, q=0.99):
 
 
 # ======= ENERGY NUMERICAL SOLUTION: LOG-NORMAL FITTING ===============
+# --- Conditional and Global Moments of  Log-Normal ---
+def Global_Moments(a: float, beta: float, dt: float, Nystrom_grid: int, z_max: float):
+    I, K, z_grid, w, h = Nystrom(
+        z_max=z_max,
+        N=Nystrom_grid,
+        kernel_pdf=lambda delta: f_X(delta, beta=beta, a=a),    # delta = b_j - z_i
+    )
+
+    # CONDITIONAL MOMENTS CALCULATION
+    m1 = solve(I - K, dt * z_grid)
+    m2 = solve(I - K, 2.0 * dt * z_grid * m1 - (dt * z_grid) ** 2)
+
+    # ENTRANCE MIXTURE: GLOBAL MOMENTS
+    Ppos = 1.0 - F_X(0.0, beta=beta, a=a)
+    pdf_grid = f_X(z_grid, beta=beta, a=a)
+
+    E1 = GM_mix(m1, w, h, pdf_grid, Ppos)
+    E2 = GM_mix(m2, w, h, pdf_grid, Ppos)
+    return E1, E2
+
 # --- Numba friendly grid builder ---
-@njit
+"""@njit
 def geomspace_grid(lo, hi, n):
     grid = np.empty(n, dtype=np.float64)
 
@@ -142,12 +172,14 @@ def geomspace_grid(lo, hi, n):
 
 
 # --- Fitted model ---
-@dataclass(frozen=True)
-class LogNormParams:
-    mu: float
-    sigma: float  # > 0
-    scale: float  # exp(mu)
-    e_grid: np.ndarray
+
+def E_LogNorm_solution(e_sim: np.ndarray, E_min: float,
+                       E1: float, E2: float, grid: int):
+    mu, sigma, scale = LogNormal_params(E1, E2)
+    e_grid = geomspace_grid(E_min, e_sim[-1], grid)
+    params = LogNormParams(mu, sigma, scale, e_grid)
+    LN_pdf, LN_cdf = LogNormal_fit(mu, sigma, e_grid)
+    return params, LN_pdf, LN_cdf"""
 
 def LogNormal_params(m1: float, m2: float):
     m1 = float(m1)
@@ -164,13 +196,20 @@ def LogNormal_fit(mu: float, sigma: float, x: np.ndarray):
     rv = lognorm(s=sigma, scale=np.exp(mu), loc=0.0)
     return rv.pdf(x), rv.cdf(x)
 
+@dataclass(frozen=True)
+class LogNormParams:
+    mu: float
+    sigma: float  # > 0
+    scale: float  # exp(mu)
+    e_grid: np.ndarray
+
 def E_LogNorm_solution(e_sim: np.ndarray, E_min: float,
                        E1: float, E2: float, grid: int):
     mu, sigma, scale = LogNormal_params(E1, E2)
-
-    e_grid = geomspace_grid(E_min, e_sim[-1], grid)
+    e_grid = linspace(E_min, e_sim[-1], grid)
     params = LogNormParams(mu, sigma, scale, e_grid)
     LN_pdf, LN_cdf = LogNormal_fit(mu, sigma, e_grid)
-    return params, LN_pdf, LN_cdf
+    p99 = Fitted_quantile(e_grid, LN_pdf, q=0.99)
+    return params, LN_pdf, LN_cdf, p99
 # =====================================================================
 
