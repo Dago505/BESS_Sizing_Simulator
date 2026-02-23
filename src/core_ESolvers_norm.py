@@ -23,21 +23,11 @@ import src.core_Solvers
 importlib.reload(src.core_Solvers)
 from src.core_Solvers import *
 
-# --- Figures ---
-import src.core_Figures
-importlib.reload(src.core_Figures)
-from src.core_Figures import *
 
-# --- Parametric moments ---
-import src.core_Moments
-importlib.reload(src.core_Moments)
-from src.core_Moments import *
-
-
-# === ENERGY ALGORITHMIC SOLUTION: SIMULATION ===
+# ========== ENERGY ALGORITHMIC SOLUTION: SIMULATION ============
 @njit(cache=True, fastmath=True)
-def Energy_ramps(Y, a_tilde, dt):
-    N = Y.size
+def Energy_ramps(Y_tilde, a_tilde, dt):
+    N = Y_tilde.size
     B = np.zeros(N + 1, dtype=np.float64)
     energies = np.empty(N // 2 + 2, dtype=np.float64)
     n_ener = 0
@@ -46,7 +36,7 @@ def Energy_ramps(Y, a_tilde, dt):
     ramp_energy_acc = 0.0
 
     for n in range(N):
-        b_next = B[n] + (-Y[n] - a_tilde)
+        b_next = B[n] + (-Y_tilde[n] - a_tilde)
         if b_next < 0.0:
             b_next = 0.0
         B[n + 1] = b_next
@@ -92,26 +82,26 @@ def E_algorithmic_solution(a_tilde: float, beta: float, Y: np.ndarray, dt:float,
         99 percentil of the energy pdf "f(e)"
     """
     Y_tilde = beta * Y
-    energies = Energy_ramps(Y_tilde, a_tilde, dt)
+    energies_tilde = Energy_ramps(Y_tilde, a_tilde, dt)
 
     # --- pdf histogram calculation ---
-    f_sim, e_sim = histogram(energies, grid)
+    e_sim, f_sim_tilde = histogram(energies_tilde, grid)
 
     # --- cdf histogram calculation ---
-    E_sim, F_sim = histogram_cdf(energies, 110000, vmin=1e-5)
+    E_sim, F_sim_tilde = histogram_cdf(energies_tilde, 110000, vmin=1e-5)
     
     #p0_sim = count_less_than(BESS, 1e-6) / BESS.size
-    p99_sim = quantile(energies, q)
+    p99_sim_tilde = quantile(energies_tilde, q)
 
-    E_pdf = (e_sim, f_sim)
-    E_cdf = (E_sim, F_sim)
-    return energies, E_pdf, E_cdf, p99_sim
+    E_pdf = (f_sim_tilde, e_sim)
+    E_cdf = (F_sim_tilde, E_sim)
+    return energies_tilde, E_pdf, E_cdf, p99_sim_tilde
 
 # =====================================================================
 
 
+
 # ======= ENERGY NUMERICAL SOLUTION: LOG-NORMAL FITTING ===============
-# --- Conditional and Global Moments of  Log-Normal ---
 @njit
 def LogNormal_params(m1: float, m2: float):
     m1 = float(m1)
@@ -156,30 +146,89 @@ def LogNormal_fit(mu, sigma, x):
 
     return pdf, cdf
 
-@njit(fastmath=True)
-def E_LogNorm_solution(a, beta, dt, Nystrom_grid, e_sim, E_min, grid):
-    E1, E2 = Global_Moments(a, beta, dt, Nystrom_grid, 40.0)
+@njit
+def E_LogNorm_solution_norm(a_tilde, dt, Nystrom_grid, e_sim, E_min, grid):
+    E1, E2 = Global_Moments(a_tilde, dt, Nystrom_grid, 25.0)
+
     mu, sigma, scale = LogNormal_params(E1, E2)
     e_grid = linspace(E_min, e_sim[-1], grid)
+
     LN_pdf, LN_cdf = LogNormal_fit(mu, sigma, e_grid)
+
     p99 = Fitted_quantile(e_grid, LN_pdf, q=0.99)
+    
     params = (mu, sigma, scale, e_grid)
     return params, LN_pdf, LN_cdf, p99
+# ---------------------------------------------------------------------
+
+# --- Normalized Global Moments of the Log-Normal ---------------------
+@njit(fastmath=True)
+def f_X(x_tilde, a_tilde):
+    return 0.5 * np.exp(-np.abs(x_tilde + a_tilde))
+
+@njit(fastmath=True)
+def F_X(x_tilde, a_tilde):
+    z_tilde = x_tilde + a_tilde
+    if z_tilde < 0.0:
+        return 0.5 * np.exp(z_tilde)
+    else:
+        return 1.0 - 0.5 * np.exp(-z_tilde)
 
 @njit(cache=True, fastmath=True)
-def Global_Moments(a: float, beta: float, dt: float, Nystrom_grid: int, z_max: float):
-    I, K, z_grid, w, h = Nystrom(z_max, Nystrom_grid, beta, a)
+def Global_Moments(a_tilde: float, dt: float, Nystrom_grid: int, z_max_tilde: float):
+    I, K, z_grid_tilde, w, h_tilde = Nystrom(z_max_tilde, Nystrom_grid, a_tilde)
 
     # CONDITIONAL MOMENTS CALCULATION
-    m1 = solve(I - K, dt * z_grid)
-    m2 = solve(I - K, 2.0 * dt * z_grid * m1 - (dt * z_grid) ** 2)
+    m1 = solve(I - K, dt * z_grid_tilde)
+    m2 = solve(I - K, 2.0 * dt * z_grid_tilde * m1 - (dt * z_grid_tilde) ** 2)
 
     # ENTRANCE MIXTURE: GLOBAL MOMENTS
-    Ppos = 1.0 - F_X(0.0, beta=beta, a=a)
-    pdf_grid = f_X(z_grid, beta=beta, a=a)
+    pdf_grid = f_X(z_grid_tilde, a_tilde)
+    Ppos = 1.0 - F_X(0.0, a_tilde)
 
-    E1 = GM_mix(m1, w, h, pdf_grid, Ppos)
-    E2 = GM_mix(m2, w, h, pdf_grid, Ppos)
+    E1 = GM_mix(m1, w, h_tilde, pdf_grid, Ppos)
+    E2 = GM_mix(m2, w, h_tilde, pdf_grid, Ppos)
     return E1, E2
+# ---------------------------------------------------------------------
+
+# --- Normalized Nystrom method for the Log-Normal solution -----------
+@njit(cache=True, fastmath=True)
+def kernel_pdf(delta_tilde, a_tilde):
+    return 0.5 * np.exp(-abs(delta_tilde + a_tilde))
+
+@njit(cache=True, fastmath=True)
+def Nystrom(z_max_tilde, N, a_tilde):
+    n = N + 1
+
+    # grid
+    z_grid_tilde = np.linspace(0.0, z_max_tilde, n)
+    h_tilde = z_grid_tilde[1] - z_grid_tilde[0]
+
+    # trapezoidal weights
+    w = np.ones(n, dtype=np.float64)
+    w[0] = 0.5
+    w[n - 1] = 0.5
+
+    # identity
+    I = np.eye(n, dtype=np.float64)
+
+    # build K directly: K_ij = h * w_j * f_X(z_j - z_i)
+    K = np.empty((n, n), dtype=np.float64)
+    for i in range(n):
+        zi = z_grid_tilde[i]
+        for j in range(n):
+            delta_tilde = z_grid_tilde[j] - zi
+            K[i, j] = h_tilde * w[j] * kernel_pdf(delta_tilde, a_tilde)
+    
+    return I, K, z_grid_tilde, w, h_tilde
+# ---------------------------------------------------------------------
+
+# --- Global Mixture calculation for the Log-Normal solution ----------
+@njit
+def GM_mix(m_vec, w, h, pdf_at_grid, Ppos):
+    total = 0.0
+    for i in range(len(m_vec)):
+        total += w[i] * m_vec[i] * pdf_at_grid[i]
+    return (h * total) / Ppos
 # =====================================================================
 

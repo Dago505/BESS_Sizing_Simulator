@@ -82,12 +82,11 @@ def histogram(values: np.ndarray, n_bins: int) -> Tuple[np.ndarray, np.ndarray]:
 
     bin_width = edges[1] - edges[0]
 
-    density = counts / (values.size * bin_width)
+    f_sim = counts / (values.size * bin_width)
 
-    # centers: length n_bins
-    centers = 0.5 * (edges[:-1] + edges[1:])
+    e_sim = 0.5 * (edges[:-1] + edges[1:])
 
-    return density, centers
+    return e_sim, f_sim
 
 @njit(cache=True, fastmath=True)
 def histogram_cdf(values, n_bins, vmin=0.0):
@@ -141,6 +140,7 @@ def histogram_cdf(values, n_bins, vmin=0.0):
             F_sim[i] *= inv_last
 
     return E_sim, F_sim
+
 
 def L1_norm(grid, f1, f2):
     delta = grid[1] - grid[0]

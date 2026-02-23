@@ -6,29 +6,17 @@ from scipy.stats import lognorm
 from numpy.linalg import solve
 from numba import njit
 
-@njit(fastmath=True)
-def f_X(x, beta, a):
-    return 0.5 * beta * np.exp(-beta * np.abs(x + a))
-
-@njit(fastmath=True)
-def F_X(x, beta, a):
-    z = x + a
-    if z < 0.0:
-        return 0.5 * np.exp(beta * z)
-    else:
-        return 1.0 - 0.5 * np.exp(-beta * z)
+@njit(cache=True, fastmath=True)
+def kernel_pdf(delta_tilde, a_tilde):
+    return 0.5 * np.exp(-abs(delta_tilde + a_tilde))
 
 @njit(cache=True, fastmath=True)
-def kernel_pdf(delta, beta, a):
-    return 0.5 * beta * np.exp(-beta * abs(delta + a))
-
-@njit(cache=True, fastmath=True)
-def Nystrom(z_max, N, beta, a):
+def Nystrom(z_max_tilde, N, a_tilde):
     n = N + 1
 
     # grid
-    z_grid = np.linspace(0.0, z_max, n)
-    h = z_grid[1] - z_grid[0]
+    z_grid_tilde = np.linspace(0.0, z_max_tilde, n)
+    h_tilde = z_grid_tilde[1] - z_grid_tilde[0]
 
     # trapezoidal weights
     w = np.ones(n, dtype=np.float64)
@@ -41,12 +29,12 @@ def Nystrom(z_max, N, beta, a):
     # build K directly: K_ij = h * w_j * f_X(z_j - z_i)
     K = np.empty((n, n), dtype=np.float64)
     for i in range(n):
-        zi = z_grid[i]
+        zi = z_grid_tilde[i]
         for j in range(n):
-            delta = z_grid[j] - zi
-            K[i, j] = h * w[j] * kernel_pdf(delta, beta, a)
-
-    return I, K, z_grid, w, h
+            delta_tilde = z_grid_tilde[j] - zi
+            K[i, j] = h_tilde * w[j] * kernel_pdf(delta_tilde, a_tilde)
+    
+    return I, K, z_grid_tilde, w, h_tilde
 
 @njit
 def GM_mix(m_vec, w, h, pdf_at_grid, Ppos):
