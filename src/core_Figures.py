@@ -429,6 +429,7 @@ def RQ_141_FIGURE(a_tilde_values, p99_simVals, p99_aTilde_Vals):
     plt.ylabel(r"$P_{99}(\tilde{b})$")
     plt.xlim([0.0, 3.3])
     plt.legend(loc="upper right")
+    plt.yscale("log")
     plt.show()
 
 
@@ -570,6 +571,7 @@ def RQ_141_142_FIGURE(a_tilde_values, p99_simVals, p99_aTilde_Vals):
     ax.set_xlabel("(a) " + r"$\tilde{a}$")
     ax.set_ylabel(r"$P_{99}(\tilde{b})$")
     ax.set_xlim([0.0, 3.2])
+    ax.set_yscale("log")
     ax.legend(loc="upper right")
 
     # --------  a ~ beta RELATION (Panel 2, ratio ~8x6) --------

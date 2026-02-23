@@ -40,7 +40,7 @@ def cdf_trapz_calculator(b_grid, g, p0=None):
 
 
 # --- quantile helper for numba optimization ---
-@njit
+@njit(cache=True, fastmath=True)
 def quantile(arr, q):
     sorted_arr = np.sort(arr)
     n = sorted_arr.shape[0]
@@ -56,7 +56,7 @@ def quantile(arr, q):
     
 
 # --- histogram helper for numba optimization ---
-@njit
+@njit(cache=True, fastmath=True)
 def histogram(values: np.ndarray, n_bins: int) -> Tuple[np.ndarray, np.ndarray]:
     vmin = np.min(values)
     vmax = np.max(values)
@@ -89,7 +89,7 @@ def histogram(values: np.ndarray, n_bins: int) -> Tuple[np.ndarray, np.ndarray]:
 
     return density, centers
 
-@njit
+@njit(cache=True, fastmath=True)
 def histogram_cdf(values, n_bins, vmin=0.0):
     n = values.size
 
@@ -146,7 +146,7 @@ def L1_norm(grid, f1, f2):
     delta = grid[1] - grid[0]
     g_diff = np.abs(f1 - f2)
     L1 = trapezoid_integral(g_diff, delta)
-    return L1
+    return 0.5 * L1
 
 # ---- cumsum helper for numba optimization ---
 @njit

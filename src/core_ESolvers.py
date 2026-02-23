@@ -5,6 +5,7 @@ from typing import Sequence, Dict, Tuple
 from scipy.stats import lognorm
 from numpy.linalg import solve
 from numba import njit
+import math
 
 import importlib
 # --- Core code helpers ---
@@ -34,7 +35,7 @@ from src.core_Moments import *
 
 
 # === ENERGY ALGORITHMIC SOLUTION: SIMULATION ===
-@njit(cache=True)
+@njit(cache=True, fastmath=True)
 def Energy_ramps(Y, a, dt):
     N = Y.size
     B = np.zeros(N + 1, dtype=np.float64)
@@ -74,7 +75,7 @@ class CDF:
     grid: np.ndarray
     f: np.ndarray
 
-@njit
+@njit(cache=True, fastmath=True)
 def E_algorithmic_solution_raw(a: float, Y: np.ndarray, dt:float, 
                          grid: int, q: float = 0.99) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
     """ Computes the pdf "f(e)" of the BESS simulation an returns the 99 percentile "p99". 
@@ -129,12 +130,9 @@ def E_algorithmic_solution(a, Y, dt, grid, q=0.99):
 
 # ======= ENERGY NUMERICAL SOLUTION: LOG-NORMAL FITTING ===============
 # --- Conditional and Global Moments of  Log-Normal ---
+@njit(cache=True, fastmath=True)
 def Global_Moments(a: float, beta: float, dt: float, Nystrom_grid: int, z_max: float):
-    I, K, z_grid, w, h = Nystrom(
-        z_max=z_max,
-        N=Nystrom_grid,
-        kernel_pdf=lambda delta: f_X(delta, beta=beta, a=a),    # delta = b_j - z_i
-    )
+    I, K, z_grid, w, h = Nystrom(z_max, Nystrom_grid, beta, a)
 
     # CONDITIONAL MOMENTS CALCULATION
     m1 = solve(I - K, dt * z_grid)
@@ -148,39 +146,7 @@ def Global_Moments(a: float, beta: float, dt: float, Nystrom_grid: int, z_max: f
     E2 = GM_mix(m2, w, h, pdf_grid, Ppos)
     return E1, E2
 
-# --- Numba friendly grid builder ---
-"""@njit
-def geomspace_grid(lo, hi, n):
-    grid = np.empty(n, dtype=np.float64)
-
-    # enforce strict positivity (required for log grid)
-    if lo <= 0.0:
-        lo = 1e-12
-    if hi <= lo:
-        hi = lo * 10.0
-
-    if n == 1:
-        grid[0] = lo
-        return grid
-
-    log_lo = np.log(lo)
-    log_hi = np.log(hi)
-    step = (log_hi - log_lo) / (n - 1)
-    for i in range(n):
-        grid[i] = np.exp(log_lo + step * i)
-    return grid
-
-
-# --- Fitted model ---
-
-def E_LogNorm_solution(e_sim: np.ndarray, E_min: float,
-                       E1: float, E2: float, grid: int):
-    mu, sigma, scale = LogNormal_params(E1, E2)
-    e_grid = geomspace_grid(E_min, e_sim[-1], grid)
-    params = LogNormParams(mu, sigma, scale, e_grid)
-    LN_pdf, LN_cdf = LogNormal_fit(mu, sigma, e_grid)
-    return params, LN_pdf, LN_cdf"""
-
+@njit
 def LogNormal_params(m1: float, m2: float):
     m1 = float(m1)
     m2 = float(m2)
@@ -191,25 +157,46 @@ def LogNormal_params(m1: float, m2: float):
 
     return mu, sigma, float(np.exp(mu))
 
-def LogNormal_fit(mu: float, sigma: float, x: np.ndarray):
-    x = np.asarray(x, dtype=float)
-    rv = lognorm(s=sigma, scale=np.exp(mu), loc=0.0)
-    return rv.pdf(x), rv.cdf(x)
+SQRT2 = math.sqrt(2.0)
+SQRT2PI = math.sqrt(2.0 * math.pi)
 
-@dataclass(frozen=True)
-class LogNormParams:
-    mu: float
-    sigma: float  # > 0
-    scale: float  # exp(mu)
-    e_grid: np.ndarray
+@njit(fastmath=True)
+def _lognormal_pdf_scalar(x, mu, sigma):
+    if x <= 0.0:
+        return 0.0
+    inv_sigma = 1.0 / sigma
+    z = (math.log(x) - mu) * inv_sigma
+    return math.exp(-0.5 * z * z) / (x * sigma * SQRT2PI)
 
-def E_LogNorm_solution(e_sim: np.ndarray, E_min: float,
-                       E1: float, E2: float, grid: int):
+@njit(fastmath=True)
+def _lognormal_cdf_scalar(x, mu, sigma):
+    if x <= 0.0:
+        return 0.0
+    z = (math.log(x) - mu) / (sigma * SQRT2)
+    # Phi(z) = 0.5 * (1 + erf(z))
+    return 0.5 * (1.0 + math.erf(z))
+
+@njit(fastmath=True)
+def LogNormal_fit(mu, sigma, x):
+    # x is expected to be a 1D float array
+    n = x.size
+    pdf = np.empty(n, dtype=np.float64)
+    cdf = np.empty(n, dtype=np.float64)
+
+    for i in range(n):
+        xi = x[i]
+        pdf[i] = _lognormal_pdf_scalar(xi, mu, sigma)
+        cdf[i] = _lognormal_cdf_scalar(xi, mu, sigma)
+
+    return pdf, cdf
+
+@njit(fastmath=True)
+def E_LogNorm_solution(e_sim, E_min, E1, E2, grid):
     mu, sigma, scale = LogNormal_params(E1, E2)
     e_grid = linspace(E_min, e_sim[-1], grid)
-    params = LogNormParams(mu, sigma, scale, e_grid)
     LN_pdf, LN_cdf = LogNormal_fit(mu, sigma, e_grid)
     p99 = Fitted_quantile(e_grid, LN_pdf, q=0.99)
+    params = (mu, sigma, scale, e_grid)
     return params, LN_pdf, LN_cdf, p99
 # =====================================================================
 

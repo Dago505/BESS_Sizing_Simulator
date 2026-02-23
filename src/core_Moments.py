@@ -4,22 +4,22 @@ from dataclasses import dataclass
 from typing import Sequence, Dict, Tuple
 from scipy.stats import lognorm
 from numpy.linalg import solve
+from numba import njit
 
-def f_X(x, beta, a):        # PDF of the effective increment x
-    x = np.asarray(x)
+@njit(fastmath=True)
+def f_X(x, beta, a):
     return 0.5 * beta * np.exp(-beta * np.abs(x + a))
 
-def F_X(x, beta, a):        # CDF of the effective increment x
-    x = np.asarray(x)
+@njit(fastmath=True)
+def F_X(x, beta, a):
     z = x + a
-    out = np.empty_like(z, dtype=float)
-    m = (z < 0)
-    out[m]  = 0.5 * np.exp(beta * z[m])
-    out[~m] = 1.0 - 0.5 * np.exp(-beta * z[~m])
-    return out
+    if z < 0.0:
+        return 0.5 * np.exp(beta * z)
+    else:
+        return 1.0 - 0.5 * np.exp(-beta * z)
 
 # Nystrom discretization for conditional moments
-def Nystrom(z_max, N, kernel_pdf):
+"""def Nystrom(z_max, N, kernel_pdf):
     z_grid = np.linspace(0.0, z_max, N + 1)
     h = z_grid[1] - z_grid[0]
 
@@ -35,7 +35,42 @@ def Nystrom(z_max, N, kernel_pdf):
     K = h * kernel_pdf(delta) * w[None, :]
     I = np.eye(z_grid.size)
 
+    return I, K, z_grid, w, h"""
+
+
+@njit(cache=True, fastmath=True)
+def kernel_pdf(delta, beta, a):
+    return 0.5 * beta * np.exp(-beta * abs(delta + a))
+
+@njit(cache=True, fastmath=True)
+def Nystrom(z_max, N, beta, a):
+    n = N + 1
+
+    # grid
+    z_grid = np.linspace(0.0, z_max, n)
+    h = z_grid[1] - z_grid[0]
+
+    # trapezoidal weights
+    w = np.ones(n, dtype=np.float64)
+    w[0] = 0.5
+    w[n - 1] = 0.5
+
+    # identity
+    I = np.eye(n, dtype=np.float64)
+
+    # build K directly: K_ij = h * w_j * f_X(z_j - z_i)
+    K = np.empty((n, n), dtype=np.float64)
+    for i in range(n):
+        zi = z_grid[i]
+        for j in range(n):
+            delta = z_grid[j] - zi
+            K[i, j] = h * w[j] * kernel_pdf(delta, beta, a)
+
     return I, K, z_grid, w, h
 
+@njit
 def GM_mix(m_vec, w, h, pdf_at_grid, Ppos):
-    return (h * np.sum(w * m_vec * pdf_at_grid)) / Ppos
+    total = 0.0
+    for i in range(len(m_vec)):
+        total += w[i] * m_vec[i] * pdf_at_grid[i]
+    return (h * total) / Ppos
